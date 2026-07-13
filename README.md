@@ -54,9 +54,8 @@ Do not commit production usernames, internal IP addresses, SSH host keys, passwo
 cisco-c9200-ot-investigation/
 ├── CiscoC9200-OT-Investigation.ps1
 ├── README.md
-├── GITHUB_INFO.txt
 ├── switches.example.ps1
-└── .gitignore
+
 ```
 
 `plink.exe` is intentionally not included. Download PuTTY/Plink from its official source and place `plink.exe` beside the script or add it to `PATH`.
