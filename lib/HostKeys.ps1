@@ -14,7 +14,7 @@ function Parse-PlinkHostKeyMessage {
 
 function Parse-PlinkHostKeyChanged {
     param([string]$Message)
-    if ($Message -notmatch 'POTENTIAL SECURITY BREACH|host key does not match') {
+    if ($Message -notmatch 'POTENTIAL SECURITY BREACH|host key does not match|did not match') {
         return $null
     }
     $parsed = Parse-PlinkHostKeyMessage $Message
@@ -26,6 +26,39 @@ function Parse-PlinkHostKeyChanged {
         }
     }
     return @{ Changed = $true; NewFingerprint = ''; NewAlgorithm = '' }
+}
+
+function Get-HostKeyAction {
+    param(
+        [string]$Output,
+        [bool]$HadKey,
+        [int]$Retries,
+        [string]$Policy
+    )
+    $none = @{ Action = 'None'; Fingerprint = ''; Algorithm = ''; Note = '' }
+
+    if (Parse-PlinkHostKeyChanged $Output) {
+        $none.Action = 'Skip'
+        $none.Note = 'host key CHANGED - skipped (possible impersonation, investigate before trusting)'
+        return $none
+    }
+
+    $learned = Parse-PlinkHostKeyMessage $Output
+    if (-not $learned -or $HadKey) { return $none }
+
+    if ($Policy -ne 'AutoAccept') {
+        $none.Action = 'Skip'
+        $none.Note = 'host key not trusted yet (policy Strict) - skipped'
+        return $none
+    }
+    if ($Retries -ge 1) { return $none }
+
+    return @{
+        Action      = 'Retry'
+        Fingerprint = $learned.Fingerprint
+        Algorithm   = $learned.Algorithm
+        Note        = 'host key auto-accepted on first use'
+    }
 }
 
 function New-KnownHostsStore {

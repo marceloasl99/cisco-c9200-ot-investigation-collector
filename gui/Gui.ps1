@@ -367,6 +367,18 @@ function Show-CollectorGui {
         return , $cats
     }
 
+    function Get-SelectedLogDays {
+        $sel = $ctrl['cmbLogDays'].SelectedItem
+        if ($null -eq $sel) { return 30 }
+        $tag = [string]$sel.Tag
+        if ($tag -eq '-1') {
+            $n = 0
+            if ([int]::TryParse($ctrl['txtCustomDays'].Text, [ref]$n) -and $n -ge 0) { return $n }
+            return 30
+        }
+        return [int]$tag
+    }
+
     # --- Start collection ---
     function Start-Collection {
         param([array]$Targets)
@@ -440,11 +452,15 @@ function Show-CollectorGui {
         $timeout = 175
         try { $timeout = [int]$ctrl['txtTimeout'].Text } catch {}
 
+        $hostKeyPolicy = 'AutoAccept'
+        if ($null -ne $ctrl['cmbHostKeyPolicy'].SelectedItem) { $hostKeyPolicy = [string]$ctrl['cmbHostKeyPolicy'].SelectedItem.Content }
+
         $state.CollectionRun = New-CollectionRun -Targets $enabledSwitches -Commands $cmds `
             -PlinkPath $plinkPath -Username $ctrl['txtUsername'].Text `
             -SecurePassword $ctrl['txtPassword'].SecurePassword `
             -SupportsPwFile $supportsPwFile -MaxParallel $maxPar `
-            -PerSwitchTimeoutSeconds $timeout -HostKeyResolutions $hostKeyResolutions
+            -PerSwitchTimeoutSeconds $timeout -HostKeyResolutions $hostKeyResolutions `
+            -HostKeyPolicy $hostKeyPolicy -KnownHostsStore $state.KnownHostsStore
 
         $state.RunStart = [datetime]::Now
         $state.RunInfo = @{
@@ -453,6 +469,8 @@ function Show-CollectorGui {
             SupportsPwFile = $supportsPwFile
             CommandCount   = $cmds.Count
             MaxParallel    = $maxPar
+            LogDays        = (Get-SelectedLogDays)
+            WantLogs       = (($cats -contains 'Logs') -and ($logSources -contains 'Buffer'))
         }
         $state.Running = $true
         $state.ProgressData.Clear()
@@ -650,16 +668,7 @@ function Show-CollectorGui {
                         $reportPath = Join-Path $reportDir $reportName
                         $state.ReportPath = $reportPath
 
-                        $logDays = 30
-                        $sel = $ctrl['cmbLogDays'].SelectedItem
-                        if ($null -ne $sel) {
-                            $tag = [string]$sel.Tag
-                            if ($tag -eq '-1') {
-                                try { $logDays = [int]$ctrl['txtCustomDays'].Text } catch {}
-                            } else {
-                                $logDays = [int]$tag
-                            }
-                        }
+                        $logDays = [int]$state.RunInfo['LogDays']
 
                         $presetName = ''
                         if ($ctrl['cmbPreset'].SelectedItem) { $presetName = [string]$ctrl['cmbPreset'].SelectedItem }
@@ -681,18 +690,28 @@ function Show-CollectorGui {
                         foreach ($sw in $state.CollectionRun.SwitchStates) {
                             $started = if ($sw['Started']) { $sw['Started'] } else { $state.RunStart }
                             $finished = if ($sw['Finished']) { $sw['Finished'] } else { $runEnd }
+                            $analysis = $null
+                            if ($state.RunInfo['WantLogs'] -and $sw['Status'] -in @('Done', 'TimedOut') -and $sw['StdOut']) {
+                                $analysis = New-LogAnalysis -Output ([string]$sw['StdOut']) -Days $logDays -FallbackDate $started
+                            }
+                            $notes = @()
+                            if ($sw['Note']) { $notes += [string]$sw['Note'] }
+                            if ($sw['TimedOut']) { $notes += 'timed out' }
                             $blocks += New-SwitchBlock -Params @{
-                                Name       = $sw['Name']
-                                Ip         = $sw['Ip']
-                                Started    = $started
-                                Finished   = $finished
-                                HostKey    = $sw['HostKey']
-                                KeySource  = $sw['KeySource']
-                                LogSummary = ''
-                                StdOut     = [string]$sw['StdOut']
-                                StdErr     = [string]$sw['StdErr']
-                                ExitCode   = $sw['ExitCode']
-                                TimedOut   = $sw['TimedOut']
+                                Name           = $sw['Name']
+                                Ip             = $sw['Ip']
+                                Started        = $started
+                                Finished       = $finished
+                                HostKey        = $sw['HostKey']
+                                KeySource      = $sw['KeySource']
+                                Note           = ($notes -join '; ')
+                                LogSummary     = if ($analysis) { $analysis.Summary } else { '' }
+                                LogEntriesText = if ($analysis) { $analysis.EntriesText } else { '' }
+                                LogDays        = $logDays
+                                StdOut         = [string]$sw['StdOut']
+                                StdErr         = [string]$sw['StdErr']
+                                ExitCode       = $sw['ExitCode']
+                                TimedOut       = $sw['TimedOut']
                             }
                             $summaryRows += @{
                                 Name        = $sw['Name']
@@ -700,8 +719,8 @@ function Show-CollectorGui {
                                 Status      = $sw['Status']
                                 Duration    = ('{0:N0}s' -f ($finished - $started).TotalSeconds)
                                 KB          = ('{0:N1}' -f ($sw['BytesRead'] / 1024))
-                                LogCoverage = ''
-                                Notes       = if ($sw['TimedOut']) { 'timed out' } else { '' }
+                                LogCoverage = if ($analysis) { $analysis.CoverageShort } else { '' }
+                                Notes       = ($notes -join '; ')
                             }
                         }
 
@@ -717,13 +736,6 @@ function Show-CollectorGui {
                         $ctrl['lblRunStatus'].Content = 'Done'
                         Write-EventLog "Report saved: $reportName"
 
-                        # Save host keys from TOFU
-                        foreach ($sw in $state.CollectionRun.SwitchStates) {
-                            if ($sw['Status'] -eq 'Done' -and $sw['HostKey']) {
-                                Set-KnownHostKey -Store $state.KnownHostsStore `
-                                    -Ip $sw['Ip'] -Fingerprint $sw['HostKey'] -Algorithm ''
-                            }
-                        }
                         Save-KnownHostsStore -Store $state.KnownHostsStore -Path $knownHostsPath
                     }
                     catch {

@@ -25,12 +25,19 @@ function Parse-CiscoTimestamp {
     $sec   = [int]$Matches[6]
 
     if ($null -eq $year -and $null -ne $ReferenceYear) {
-        $year = [int]$ReferenceYear
-        $candidate = [datetime]::new($year, $month, $day, $hour, $min, $sec)
-        $refApprox = [datetime]::new($year, 11, 5, 0, 0, 0)
-        if ($candidate -gt $refApprox.AddDays(2)) {
-            $year--
+        if ($ReferenceYear -is [datetime]) {
+            $refDate = $ReferenceYear
+            $year = $refDate.Year
         }
+        else {
+            $year = [int]$ReferenceYear
+            $refDate = [datetime]::new($year, 11, 5, 0, 0, 0)
+        }
+        try {
+            $candidate = [datetime]::new($year, $month, $day, $hour, $min, $sec)
+            if ($candidate -gt $refDate.AddDays(2)) { $year-- }
+        }
+        catch { }
     }
     elseif ($null -eq $year) {
         $year = [datetime]::Now.Year

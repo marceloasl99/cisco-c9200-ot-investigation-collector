@@ -129,8 +129,8 @@
 
                         <StackPanel Orientation="Horizontal" Margin="4">
                             <Label Content="Log period:"/>
-                            <ComboBox Name="cmbLogDays" Width="120" VerticalAlignment="Center" IsEnabled="False"
-                                      ToolTip="Not implemented yet: the full log buffer is collected and the report is not filtered by period.">
+                            <ComboBox Name="cmbLogDays" Width="120" VerticalAlignment="Center"
+                                      ToolTip="Only log entries inside this period are listed in the report (the raw output is always kept in full).">
                                 <ComboBoxItem Content="3 days" Tag="3"/>
                                 <ComboBoxItem Content="7 days" Tag="7"/>
                                 <ComboBoxItem Content="30 days" Tag="30" IsSelected="True"/>
@@ -200,7 +200,7 @@
 
                     <Label Grid.Row="7" Content="Host key policy:"/>
                     <ComboBox Name="cmbHostKeyPolicy" Grid.Row="7" Grid.Column="1" Width="150" HorizontalAlignment="Left" Margin="4,2"
-                              IsEnabled="False" ToolTip="Not implemented yet: trust the switch host key in PuTTY first, or pin it under hostKeys in settings.json.">
+                              ToolTip="AutoAccept: trust a switch's host key the first time and remember it. Strict: skip switches whose key is not already trusted. A changed key is always skipped.">
                         <ComboBoxItem Content="AutoAccept" IsSelected="True"/>
                         <ComboBoxItem Content="Strict"/>
                     </ComboBox>

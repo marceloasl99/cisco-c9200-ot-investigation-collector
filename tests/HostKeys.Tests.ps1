@@ -66,6 +66,45 @@ Connection abandoned.
     }
 }
 
+Describe 'Get-HostKeyAction' {
+    BeforeAll {
+        $script:unknown = "The host key is not cached for this server:`n  10.0.0.1 (port 22)`nThe server's ssh-ed25519 key fingerprint is:`n  ssh-ed25519 255 SHA256:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk1234`nConnection abandoned."
+        $script:changed = "WARNING - POTENTIAL SECURITY BREACH!`nThe server's host key does not match the one PuTTY has`ncached for this server.`nThe new ssh-ed25519 key fingerprint is:`n  ssh-ed25519 255 SHA256:NewKeyFingerprint1234567890abcdefghijklm`nConnection abandoned."
+    }
+
+    It 'retries with the learned key when the key is unknown and policy is AutoAccept' {
+        $a = Get-HostKeyAction -Output $script:unknown -HadKey $false -Retries 0 -Policy 'AutoAccept'
+        $a.Action | Should -Be 'Retry'
+        $a.Fingerprint | Should -Be 'SHA256:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk1234'
+        $a.Algorithm | Should -Be 'ssh-ed25519'
+    }
+
+    It 'skips and does not learn the key under the Strict policy' {
+        $a = Get-HostKeyAction -Output $script:unknown -HadKey $false -Retries 0 -Policy 'Strict'
+        $a.Action | Should -Be 'Skip'
+        $a.Note | Should -Match 'not trusted'
+    }
+
+    It 'never retries more than once' {
+        (Get-HostKeyAction -Output $script:unknown -HadKey $false -Retries 1 -Policy 'AutoAccept').Action | Should -Be 'None'
+    }
+
+    It 'skips a changed host key and never auto-accepts it' {
+        $a = Get-HostKeyAction -Output $script:changed -HadKey $true -Retries 0 -Policy 'AutoAccept'
+        $a.Action | Should -Be 'Skip'
+        $a.Note | Should -Match 'CHANGED'
+    }
+
+    It 'treats a mismatch against a supplied -hostkey as changed' {
+        $out = "Host key did not match the supplied -hostkey`nConnection abandoned."
+        (Get-HostKeyAction -Output $out -HadKey $true -Retries 0 -Policy 'AutoAccept').Action | Should -Be 'Skip'
+    }
+
+    It 'does nothing for normal output' {
+        (Get-HostKeyAction -Output 'show version output' -HadKey $false -Retries 0 -Policy 'AutoAccept').Action | Should -Be 'None'
+    }
+}
+
 Describe 'New-KnownHostsStore' {
     It 'creates an empty store' {
         $store = New-KnownHostsStore

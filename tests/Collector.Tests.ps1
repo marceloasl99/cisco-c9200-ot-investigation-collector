@@ -1,5 +1,6 @@
 BeforeAll {
     $ProjectRoot = Split-Path $PSScriptRoot -Parent
+    . (Join-Path $ProjectRoot 'lib/HostKeys.ps1')
     . (Join-Path $ProjectRoot 'lib/Plink.ps1')
     . (Join-Path $ProjectRoot 'lib/Collector.ps1')
 }
@@ -110,5 +111,83 @@ Describe 'Stop-CollectionRun' {
         }
         Test-Path -LiteralPath $tempRoot | Should -BeFalse
         $run.PlainPassword | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Step-CollectionRun host key handling' {
+    BeforeAll {
+        $script:dir = Join-Path ([IO.Path]::GetTempPath()) ("hk_{0}" -f [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $script:dir | Out-Null
+
+        function New-FakePlink([string]$Name, [string]$Mode) {
+            $log = Join-Path $script:dir "$Name.log"
+            $lines = @('@echo off', "echo called %* >> `"$log`"")
+            if ($Mode -eq 'unknown') {
+                $lines += 'echo %* | findstr /C:"-hostkey" >nul', 'if %errorlevel%==0 goto ok',
+                    '>&2 echo The host key is not cached for this server:',
+                    '>&2 echo The server''s ssh-ed25519 key fingerprint is:',
+                    '>&2 echo   ssh-ed25519 255 SHA256:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk1234',
+                    '>&2 echo Connection abandoned.', 'exit /b 1', ':ok', 'echo SWITCH OUTPUT', 'exit /b 0'
+            }
+            elseif ($Mode -eq 'changed') {
+                $lines += '>&2 echo WARNING - POTENTIAL SECURITY BREACH!',
+                    '>&2 echo The server''s host key does not match the one PuTTY has',
+                    '>&2 echo   ssh-ed25519 255 SHA256:NewKeyFingerprint1234567890abcdefghijklm',
+                    '>&2 echo Connection abandoned.', 'exit /b 1'
+            }
+            $path = Join-Path $script:dir "$Name.cmd"
+            [IO.File]::WriteAllLines($path, $lines)
+            return @{ Path = $path; Log = $log }
+        }
+
+        function Invoke-Run($fake, [string]$Policy, [hashtable]$Resolutions = @{}, $Store = $null) {
+            $pw = ConvertTo-SecureString 'x' -AsPlainText -Force
+            $run = New-CollectionRun -Targets @(@{ Name = 'SW'; Ip = '10.0.0.1' }) -Commands @('exit') `
+                -PlinkPath $fake.Path -Username 'u' -SecurePassword $pw -SupportsPwFile $false `
+                -MaxParallel 1 -PerSwitchTimeoutSeconds 30 -HostKeyPolicy $Policy `
+                -HostKeyResolutions $Resolutions -KnownHostsStore $Store
+            $deadline = (Get-Date).AddSeconds(30)
+            while (-not $run.Done -and (Get-Date) -lt $deadline) { Step-CollectionRun $run; Start-Sleep -Milliseconds 100 }
+            Stop-CollectionRun $run
+            return $run
+        }
+    }
+    AfterAll { Remove-Item -LiteralPath $script:dir -Recurse -Force -ErrorAction SilentlyContinue }
+
+    It 'learns an unknown key, retries once with -hostkey and finishes (AutoAccept)' {
+        $fake = New-FakePlink 'auto' 'unknown'
+        $store = New-KnownHostsStore
+        $run = Invoke-Run $fake 'AutoAccept' @{} $store
+        $sw = $run.SwitchStates[0]
+        $sw['Status'] | Should -Be 'Done'
+        $sw['StdOut'] | Should -Match 'SWITCH OUTPUT'
+        $sw['HostKey'] | Should -Be 'SHA256:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk1234'
+        $sw['KeySource'] | Should -Match 'auto-accepted'
+        @(Get-Content $fake.Log).Count | Should -Be 2
+        (Get-KnownHostKey $store '10.0.0.1').fingerprint | Should -Be 'SHA256:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk1234'
+    }
+
+    It 'connects once when the key is already known' {
+        $fake = New-FakePlink 'known' 'unknown'
+        $res = @{ '10.0.0.1' = @{ Source = 'known_hosts'; Fingerprint = 'SHA256:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk1234' } }
+        $run = Invoke-Run $fake 'AutoAccept' $res
+        $run.SwitchStates[0]['Status'] | Should -Be 'Done'
+        @(Get-Content $fake.Log).Count | Should -Be 1
+    }
+
+    It 'skips the switch under the Strict policy without retrying' {
+        $fake = New-FakePlink 'strict' 'unknown'
+        $run = Invoke-Run $fake 'Strict'
+        $run.SwitchStates[0]['Status'] | Should -Be 'Skipped'
+        $run.SwitchStates[0]['Note'] | Should -Match 'not trusted'
+        @(Get-Content $fake.Log).Count | Should -Be 1
+    }
+
+    It 'skips a changed host key and never retries' {
+        $fake = New-FakePlink 'changed' 'changed'
+        $run = Invoke-Run $fake 'AutoAccept'
+        $run.SwitchStates[0]['Status'] | Should -Be 'Skipped'
+        $run.SwitchStates[0]['Note'] | Should -Match 'CHANGED'
+        @(Get-Content $fake.Log).Count | Should -Be 1
     }
 }
