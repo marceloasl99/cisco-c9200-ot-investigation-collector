@@ -30,13 +30,15 @@ This is what works today and what does not yet. Please read it before relying on
 
 | Works | Not implemented yet |
 |---|---|
-| GUI, the four target modes, subnet scan, cancel during scan | **Log period filtering** (3/7/30/90 days). The report contains the full `show logging` buffer. The *Log period* selector is disabled. |
-| Parallel collection with live progress and one consolidated TXT report | **Automatic host-key acceptance.** A switch whose SSH host key is not already trusted will fail. See [SSH host keys](#ssh-host-keys). |
-| Presets (selecting them), categories, VLAN list, MAC trace | Preset **Save / Save as / Delete** buttons (disabled). Edit presets in `settings.json`. |
-| `settings.json` overrides, pinned host keys | Choices made in the GUI are **not persisted** between runs. |
-| Legacy sequential command-line mode (`-NoGui`, `-Mode`) | Parallel, scan, and preset options on the command line. |
+| GUI, the four target modes, subnet scan, cancel during scan | Preset **Save / Save as / Delete** buttons (disabled). Edit presets in `settings.json`. |
+| Parallel collection with live progress and one consolidated TXT report | Choices made in the GUI are **not persisted** between runs. |
+| **Log period** (3/7/30/90 days, all, or custom): the report lists only entries inside the period and states whether the buffer reaches back that far | Parallel, scan, and preset options on the command line. |
+| **Automatic host-key acceptance** on first use, with changed keys always blocked | The *SSH connect timeout* box (disabled). |
+| Presets (selecting them), categories, VLAN list, MAC trace | |
+| `settings.json` overrides, pinned host keys | |
+| Legacy sequential command-line mode (`-NoGui`, `-Mode`) | |
 
-Testing so far: 217 automated tests pass on both Windows PowerShell 5.1 and PowerShell 7, and the GUI was exercised end to end against a fake `plink` and local SSH-banner listeners. **It has not yet been run against a live Catalyst 9200.** Command syntax can vary by IOS-XE release (see [Troubleshooting](#troubleshooting)).
+Testing so far: 241 automated tests pass on both Windows PowerShell 5.1 and PowerShell 7, and the GUI was exercised end to end against a fake `plink` and local SSH-banner listeners. **It has not yet been run against a live Catalyst 9200.** Command syntax can vary by IOS-XE release (see [Troubleshooting](#troubleshooting)).
 
 ## Requirements
 
@@ -51,7 +53,7 @@ Testing so far: 217 automated tests pass on both Windows PowerShell 5.1 and Powe
 
 1. Clone or download this repository.
 2. Put `plink.exe` in the project folder (or note where it is).
-3. Make sure the switch's SSH host key is trusted (see [SSH host keys](#ssh-host-keys)).
+3. Nothing to prepare for SSH host keys by default: the tool trusts a switch on first use and remembers it (see [SSH host keys](#ssh-host-keys)).
 4. Unblock the files if Windows marked them as downloaded:
 
    ```powershell
@@ -97,14 +99,13 @@ Selecting a preset fills in the Collection tab. These are built in:
 | VLAN focus | Identity, Layer2, Logs, VLANs = only listed | Buffer |
 | MAC trace | Identity, Layer2, Layer3 | none |
 
-> The day counts in the preset names are stored with the preset, but the period is not applied to the report yet (see [Current status](#current-status)).
-
 ![Collection tab with the Standard investigation preset](docs/images/gui-collection.png)
 
 ## Collection options
 
 - **Categories** choose which groups of commands run (full list below).
 - **Log sources:** *Buffer* runs `show logging`. *Reboot history* runs `show logging onboard switch active uptime detail`.
+- **Log period:** 3, 7, 30, or 90 days, all, or a custom number of days. It decides which entries are listed in the report's log section (see [Report](#report)); the raw output is always kept in full.
 - **VLANs:** *All*, or *Only listed* (for example `10,20,30-35`; VLAN IDs 1 to 4094, at most 64). With the **Layer2** category ticked, each listed VLAN adds `show vlan id N`, `show spanning-tree vlan N detail`, and `show mac address-table vlan N`.
 - **MAC addresses to trace:** any common format (`00:11:22:33:44:55`, `00-11-22-33-44-55`, `0011.2233.4455`). Each adds `show mac address-table address <mac>` (and an ARP lookup when Layer3 is selected).
 
@@ -154,22 +155,24 @@ Notes:
 
 ## SSH host keys
 
-`plink` runs in `-batch` mode, so it cannot ask whether to trust a new host key. Today you need to do **one** of these before collecting from a switch:
+`plink` runs in `-batch` mode, so it cannot ask whether to trust a new host key. The tool handles it for you, according to the **Host key policy** on the Connection tab:
 
-- **Trust it once in PuTTY** for the Windows user that runs the tool: run `plink.exe -ssh user@<switch-ip>`, check the fingerprint through a trusted channel, answer `y`, then exit. The key is stored in the registry (`HKCU\Software\SimonTatham\PuTTY\SshHostKeys`).
-- **Pin the verified fingerprint** in `settings.json` under `hostKeys` (example above). The tool then passes it to `plink` with `-hostkey` (this path has not yet been validated against a live switch, so confirm it on your first run).
+- **AutoAccept** (default): the first time a switch presents a key that is not known yet, the tool reads the fingerprint `plink` reports, remembers it in `known_hosts.json`, and connects again **once** with `-hostkey`. The check happens before login, so no credentials are sent to a host whose key you have not seen. The report shows `HOST KEY ... (source: auto-accepted on first use)`. From then on the remembered key is enforced.
+- **Strict**: a switch whose key is not already trusted is skipped, with a note in the report.
 
-If neither is done, that switch's block in the report shows the `plink` host-key message and no data. Never accept an unexpected *changed* key without investigating. The GUI's host-key policy box and `known_hosts.json` are reserved for the planned automatic acceptance on first use.
+Either way, a switch whose key **changed** (different from the remembered or pinned one) is always skipped, with a `host key CHANGED` note. Investigate before trusting it again: delete its entry from `known_hosts.json` only after you have verified the new key.
 
+Key sources, in order: a fingerprint pinned under `hostKeys` in `settings.json`, then `known_hosts.json`, then PuTTY's own registry cache (`HKCU\Software\SimonTatham\PuTTY\SshHostKeys`). Auto-accepting on first use trusts whatever answers first, so for sensitive networks prefer pinning verified fingerprints. The `-hostkey` flow has been tested against a simulated `plink`, not yet against a live switch, so confirm it on your first run.
 ## Report
 
 One file per run, named `Cisco_C9200_OT_Investigation_YYYYMMDD_HHMMSS.txt`, in the report directory. It contains:
 
 - A header: start time, operator account, preset, switch count, `plink` path, whether `-pwfile` is used, commands per switch, and max parallel.
-- One block per switch, written in the order they were selected: the host key used (when pinned), **RAW CLI OUTPUT** exactly as received, **PLINK STDERR** when there is any, and **COLLECTION RESULT** (exit code, timed out or not, finish time, duration).
-- A **COLLECTION SUMMARY** table (switch, IP, status, duration, KB, notes) with start and end times. Its *Log coverage* column is reserved and currently empty.
+- One block per switch, in the order they were selected: the host key used and where it came from, a **NOTE** when something notable happened (for example a key auto-accepted or skipped), the **LOG SUMMARY** and **LOG ENTRIES**, the **RAW CLI OUTPUT** exactly as received, **PLINK STDERR** when there is any, and **COLLECTION RESULT** (exit code, timed out or not, finish time, duration).
+- **Log summary:** the period asked for and the reference time (the switch clock from `show clock`, or the PC clock if it could not be read), entries found and how many fall inside the period, oldest and newest entry, **whether the buffer reaches back far enough** (or `NOT COVERED`, meaning older events may have been overwritten), counts per severity, and the most frequent messages (for example `%LINK-3-UPDOWN`). Timestamps without a year are placed in the right year relative to the reference time. If the switch clock is not synchronised, a note says event times may be off.
+- A **COLLECTION SUMMARY** table (switch, IP, status, duration, KB, log coverage, notes) with start and end times.
 
-A status of **Done** means `plink` exited. Always check the *Exit code* and *PLINK STDERR* in the block: a failed login, for example, also ends as Done with a non-zero exit code. **TimedOut** means the per-switch timeout was reached and partial output was kept.
+Status **Skipped** means the host key policy stopped the switch before any command ran. A status of **Done** means `plink` exited. Always check the *Exit code* and *PLINK STDERR* in the block: a failed login, for example, also ends as Done with a non-zero exit code. **TimedOut** means the per-switch timeout was reached and partial output was kept.
 
 ![Run & Monitor tab while collecting](docs/images/gui-monitor.png)
 
@@ -236,7 +239,9 @@ These are the commands behind each category (from `lib/Commands.ps1`). Review th
 
 **`plink.exe was not found`**: put it beside the script, add it to `PATH`, or set the path in the Connection tab.
 
-**A switch's block shows a host-key message (for example "Connection abandoned") and no data**: the host key is not trusted yet. Trust it once in PuTTY or pin it in `settings.json` ([SSH host keys](#ssh-host-keys)).
+**A switch is Skipped with "host key not trusted yet"**: the policy is Strict. Switch it to AutoAccept, trust the key once in PuTTY, or pin it in `settings.json` ([SSH host keys](#ssh-host-keys)).
+
+**A switch is Skipped with "host key CHANGED"**: the switch now presents a different key from the one remembered. Verify it through a trusted channel (a replaced switch or a reinstall is a normal cause); only then remove its entry from `known_hosts.json`.
 
 **Status Done, but the block shows `Access denied` or a non-zero exit code**: authentication failed. Check the username, password, AAA/TACACS/RADIUS availability, and the account's privilege or command authorization.
 
@@ -274,8 +279,8 @@ lib/
   HostKeys.ps1                    host-key parsing, known-hosts store, key resolution
   Plink.ps1                       plink discovery, argument building, process start
   Collector.ps1                   parallel collection engine (queue, timeouts, cancel)
-  LogFilter.ps1                   syslog timestamp parsing and filtering (not wired in yet)
-  Report.ps1                      TXT report builders
+  LogFilter.ps1                   syslog timestamp parsing, log period filtering
+  Report.ps1                      TXT report and log-analysis builders
 tests/                            Pester tests and fixtures
 docs/                             screenshots and the design spec
 ```
