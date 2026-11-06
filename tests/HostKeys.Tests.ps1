@@ -127,6 +127,17 @@ Describe 'Save/Load KnownHostsStore roundtrip' {
         $key = Get-KnownHostKey $loaded '10.0.0.1'
         $key.fingerprint | Should -Be 'SHA256:testkey'
     }
+
+    It 'overwrites an existing store file' {
+        $store = New-KnownHostsStore
+        Set-KnownHostKey $store '10.0.0.1' 'SHA256:first' 'ssh-ed25519'
+        Save-KnownHostsStore $store $tempFile
+        Set-KnownHostKey $store '10.0.0.1' 'SHA256:second' 'ssh-ed25519'
+        Save-KnownHostsStore $store $tempFile
+        $loaded = Import-KnownHostsStore $tempFile
+        (Get-KnownHostKey $loaded '10.0.0.1').fingerprint | Should -Be 'SHA256:second'
+        Test-Path -LiteralPath ($tempFile + '.tmp') | Should -BeFalse
+    }
 }
 
 Describe 'Resolve-HostKey' {

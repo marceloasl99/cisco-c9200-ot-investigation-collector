@@ -40,6 +40,16 @@ Describe 'MainWindow.xaml' {
         }
     }
 
+    It 'has the target mode controls (saved, scan+start, scan+pick, direct IP)' {
+        $names = @(
+            'rbModeSaved','rbModeScanStart','rbModeScanPick','rbModeDirect',
+            'pnlSaved','pnlScan','pnlDirect','txtDirectIps','btnCollectNow','lblTargetHint'
+        )
+        foreach ($n in $names) {
+            $script:window.FindName($n) | Should -Not -BeNullOrEmpty -Because "control $n should exist"
+        }
+    }
+
     It 'has all named controls in Collection tab' {
         $names = @(
             'chkIdentity','chkHealth','chkInterfaces','chkLayer2','chkLayer3','chkSecurity',

@@ -4,6 +4,24 @@ BeforeAll {
     . (Join-Path $ProjectRoot 'lib/Report.ps1')
 }
 
+Describe 'Resolve-ReportDirectory' {
+    It 'resolves "." to the script folder, not the current directory' {
+        Resolve-ReportDirectory '.' 'C:\Tools\Collector' | Should -Be 'C:\Tools\Collector'
+    }
+
+    It 'resolves a relative folder under the script folder' {
+        Resolve-ReportDirectory 'reports' 'C:\Tools\Collector' | Should -Be 'C:\Tools\Collector\reports'
+    }
+
+    It 'keeps an absolute folder unchanged' {
+        Resolve-ReportDirectory 'D:\Evidence\Site-A' 'C:\Tools\Collector' | Should -Be 'D:\Evidence\Site-A'
+    }
+
+    It 'falls back to the script folder when blank' {
+        Resolve-ReportDirectory '  ' 'C:\Tools\Collector' | Should -Be 'C:\Tools\Collector'
+    }
+}
+
 Describe 'New-ReportHeader' {
     It 'produces a string with metadata fields' {
         $header = New-ReportHeader @{

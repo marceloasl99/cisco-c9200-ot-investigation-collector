@@ -10,25 +10,7 @@ param(
 
     [switch]$NoGui,
 
-    [string]$Preset,
-
-    [string]$SettingsPath,
-
-    [switch]$Scan,
-
-    [int]$LogDays = -1,
-
-    [string[]]$LogSources,
-
-    [string]$Vlans,
-
-    [ValidateSet('All','Only')]
-    [string]$VlanMode = 'All',
-
-    [string[]]$Macs,
-
-    [ValidateRange(1,10)]
-    [int]$MaxParallel = 4
+    [string]$SettingsPath
 )
 
 Set-StrictMode -Version 2.0
@@ -52,7 +34,7 @@ if (-not $isHeadless) {
     try {
         . (Join-Path $PSScriptRoot 'gui/Gui.ps1')
         $settingsFile = if ($SettingsPath) { $SettingsPath } else { Join-Path $PSScriptRoot 'settings.json' }
-        $guiSettings = Import-Settings -UserPath $settingsFile -DefaultPath (Join-Path $PSScriptRoot 'settings.default.json')
+        $guiSettings = Import-Settings -Path $settingsFile
         Show-CollectorGui -ScriptRoot $PSScriptRoot -Settings $guiSettings
         return
     }

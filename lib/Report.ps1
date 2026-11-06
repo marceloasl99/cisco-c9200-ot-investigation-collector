@@ -1,5 +1,15 @@
 Set-StrictMode -Version 2.0
 
+function Resolve-ReportDirectory {
+    param(
+        [string]$Directory,
+        [string]$ScriptRoot
+    )
+    if ([string]::IsNullOrWhiteSpace($Directory)) { return $ScriptRoot }
+    if ([IO.Path]::IsPathRooted($Directory)) { return $Directory }
+    return [IO.Path]::GetFullPath((Join-Path $ScriptRoot $Directory))
+}
+
 function New-ReportHeader {
     param([hashtable]$Params)
     $lines = @(

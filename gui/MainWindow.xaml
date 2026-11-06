@@ -17,9 +17,9 @@
             <StackPanel Orientation="Horizontal">
                 <Label Content="Preset:" VerticalAlignment="Center"/>
                 <ComboBox Name="cmbPreset" Width="250" Margin="4,0" VerticalAlignment="Center"/>
-                <Button Name="btnSavePreset" Content="Save"/>
-                <Button Name="btnSavePresetAs" Content="Save as..."/>
-                <Button Name="btnDeletePreset" Content="Delete"/>
+                <Button Name="btnSavePreset" Content="Save" IsEnabled="False" ToolTip="Not implemented yet. Edit presets in settings.json."/>
+                <Button Name="btnSavePresetAs" Content="Save as..." IsEnabled="False" ToolTip="Not implemented yet. Edit presets in settings.json."/>
+                <Button Name="btnDeletePreset" Content="Delete" IsEnabled="False" ToolTip="Not implemented yet. Edit presets in settings.json."/>
                 <Label Name="lblPresetModified" Content="(modified)" Foreground="Orange" Visibility="Collapsed" VerticalAlignment="Center"/>
             </StackPanel>
         </Border>
@@ -33,43 +33,73 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
-                    <Label Grid.Row="0" Content="Configured switches:" FontWeight="Bold"/>
-                    <DataGrid Name="dgSwitches" Grid.Row="1" AutoGenerateColumns="False"
-                              CanUserAddRows="False" CanUserDeleteRows="False" Margin="0,4">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="150"/>
-                            <DataGridTextColumn Header="IP" Binding="{Binding Ip}" Width="140"/>
-                            <DataGridCheckBoxColumn Header="Use" Binding="{Binding Enabled}" Width="50"/>
-                        </DataGrid.Columns>
-                    </DataGrid>
+                    <GroupBox Grid.Row="0" Header="How do you want to choose the switches?" Padding="6">
+                        <StackPanel>
+                            <RadioButton Name="rbModeScanPick" GroupName="targetMode" IsChecked="True" Margin="0,2"
+                                         Content="Scan a range first, then choose which switches to collect"/>
+                            <RadioButton Name="rbModeScanStart" GroupName="targetMode" Margin="0,2"
+                                         Content="Scan a range and start collecting from every Cisco switch found"/>
+                            <RadioButton Name="rbModeDirect" GroupName="targetMode" Margin="0,2"
+                                         Content="Type the switch IP address(es) directly (no scan)"/>
+                            <RadioButton Name="rbModeSaved" GroupName="targetMode" Margin="0,2"
+                                         Content="Use my saved switch list"/>
+                        </StackPanel>
+                    </GroupBox>
 
-                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,4">
-                        <Button Name="btnAddSwitch" Content="Add"/>
-                        <Button Name="btnRemoveSwitch" Content="Remove"/>
-                        <Separator Width="20" Visibility="Hidden"/>
-                        <Label Content="Scan range:" VerticalAlignment="Center"/>
-                        <TextBox Name="txtScanRange" Width="200" VerticalAlignment="Center" Margin="4,0"/>
-                        <Button Name="btnScan" Content="Scan"/>
+                    <Grid Grid.Row="1" Margin="0,6,0,0">
+                        <!-- Saved switches -->
+                        <DockPanel Name="pnlSaved" Visibility="Collapsed">
+                            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,4">
+                                <Button Name="btnAddSwitch" Content="Add"/>
+                                <Button Name="btnRemoveSwitch" Content="Remove"/>
+                            </StackPanel>
+                            <Label DockPanel.Dock="Top" Content="Saved switches:" FontWeight="Bold"/>
+                            <DataGrid Name="dgSwitches" AutoGenerateColumns="False"
+                                      CanUserAddRows="False" CanUserDeleteRows="False" Margin="0,4">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="150"/>
+                                    <DataGridTextColumn Header="IP" Binding="{Binding Ip}" Width="140"/>
+                                    <DataGridCheckBoxColumn Header="Use" Binding="{Binding Enabled}" Width="50"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </DockPanel>
+
+                        <!-- Scan (used by both scan modes) -->
+                        <DockPanel Name="pnlScan">
+                            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,4">
+                                <Label Content="Range (e.g. 10.20.30.0/24):" VerticalAlignment="Center"/>
+                                <TextBox Name="txtScanRange" Width="220" VerticalAlignment="Center" Margin="4,0"/>
+                                <Button Name="btnScan" Content="Scan"/>
+                            </StackPanel>
+                            <ProgressBar Name="pbScan" DockPanel.Dock="Top" Height="18" Margin="0,4" Visibility="Collapsed"/>
+                            <DataGrid Name="dgScanResults" AutoGenerateColumns="False"
+                                      CanUserAddRows="False" CanUserDeleteRows="False" Margin="0,4"
+                                      Visibility="Collapsed">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="IP" Binding="{Binding Ip}" Width="130" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Ping" Binding="{Binding Ping}" Width="50" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="SSH port" Binding="{Binding Tcp}" Width="70" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Banner" Binding="{Binding Banner}" Width="200" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Cisco" Binding="{Binding Cisco}" Width="50" IsReadOnly="True"/>
+                                    <DataGridCheckBoxColumn Header="Collect" Binding="{Binding Use}" Width="60"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </DockPanel>
+
+                        <!-- Direct IP entry -->
+                        <DockPanel Name="pnlDirect" Visibility="Collapsed">
+                            <Label DockPanel.Dock="Top" Content="Switch IP address(es), separated by comma, space or new line:" FontWeight="Bold"/>
+                            <TextBox Name="txtDirectIps" AcceptsReturn="True" TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto" Margin="0,4"/>
+                        </DockPanel>
+                    </Grid>
+
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,6,0,0">
+                        <Button Name="btnCollectNow" Content="Collect now" FontWeight="Bold"/>
+                        <Label Name="lblTargetHint" VerticalAlignment="Center" Foreground="#555555"/>
                     </StackPanel>
-
-                    <ProgressBar Name="pbScan" Grid.Row="3" Height="18" Margin="0,4" Visibility="Collapsed"/>
-
-                    <DataGrid Name="dgScanResults" Grid.Row="4" AutoGenerateColumns="False"
-                              CanUserAddRows="False" CanUserDeleteRows="False" IsReadOnly="True" Margin="0,4"
-                              Visibility="Collapsed">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="IP" Binding="{Binding Ip}" Width="130"/>
-                            <DataGridTextColumn Header="Ping" Binding="{Binding Ping}" Width="50"/>
-                            <DataGridTextColumn Header="TCP/22" Binding="{Binding Tcp}" Width="60"/>
-                            <DataGridTextColumn Header="Banner" Binding="{Binding Banner}" Width="200"/>
-                            <DataGridTextColumn Header="Cisco" Binding="{Binding Cisco}" Width="50"/>
-                            <DataGridCheckBoxColumn Header="Use" Binding="{Binding Use}" Width="50"/>
-                        </DataGrid.Columns>
-                    </DataGrid>
                 </Grid>
             </TabItem>
 
@@ -99,7 +129,8 @@
 
                         <StackPanel Orientation="Horizontal" Margin="4">
                             <Label Content="Log period:"/>
-                            <ComboBox Name="cmbLogDays" Width="120" VerticalAlignment="Center">
+                            <ComboBox Name="cmbLogDays" Width="120" VerticalAlignment="Center" IsEnabled="False"
+                                      ToolTip="Not implemented yet: the full log buffer is collected and the report is not filtered by period.">
                                 <ComboBoxItem Content="3 days" Tag="3"/>
                                 <ComboBoxItem Content="7 days" Tag="7"/>
                                 <ComboBoxItem Content="30 days" Tag="30" IsSelected="True"/>
@@ -164,10 +195,12 @@
                     <TextBox Name="txtTimeout" Grid.Row="5" Grid.Column="1" Text="175" Width="60" HorizontalAlignment="Left" Margin="4,2"/>
 
                     <Label Grid.Row="6" Content="SSH connect timeout (s):"/>
-                    <TextBox Name="txtConnectTimeout" Grid.Row="6" Grid.Column="1" Text="5" Width="60" HorizontalAlignment="Left" Margin="4,2"/>
+                    <TextBox Name="txtConnectTimeout" Grid.Row="6" Grid.Column="1" Text="5" Width="60" HorizontalAlignment="Left" Margin="4,2"
+                             IsEnabled="False" ToolTip="Not implemented yet."/>
 
                     <Label Grid.Row="7" Content="Host key policy:"/>
-                    <ComboBox Name="cmbHostKeyPolicy" Grid.Row="7" Grid.Column="1" Width="150" HorizontalAlignment="Left" Margin="4,2">
+                    <ComboBox Name="cmbHostKeyPolicy" Grid.Row="7" Grid.Column="1" Width="150" HorizontalAlignment="Left" Margin="4,2"
+                              IsEnabled="False" ToolTip="Not implemented yet: trust the switch host key in PuTTY first, or pin it under hostKeys in settings.json.">
                         <ComboBoxItem Content="AutoAccept" IsSelected="True"/>
                         <ComboBoxItem Content="Strict"/>
                     </ComboBox>

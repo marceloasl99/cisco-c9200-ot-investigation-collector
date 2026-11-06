@@ -75,7 +75,8 @@ function Save-KnownHostsStore {
     $json = $Store | ConvertTo-Json -Depth 10
     $tempPath = $Path + '.tmp'
     [IO.File]::WriteAllText($tempPath, $json, $utf8NoBom)
-    [IO.File]::Move($tempPath, $Path, $true)
+    if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($tempPath, $Path, [NullString]::Value) }
+    else { [IO.File]::Move($tempPath, $Path) }
 }
 
 function Import-KnownHostsStore {

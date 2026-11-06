@@ -172,7 +172,8 @@ function Save-Settings {
     $json = ConvertTo-SettingsJson $Settings
     $tempPath = $Path + '.tmp'
     [IO.File]::WriteAllText($tempPath, $json, $utf8NoBom)
-    [IO.File]::Move($tempPath, $Path, $true)
+    if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($tempPath, $Path, [NullString]::Value) }
+    else { [IO.File]::Move($tempPath, $Path) }
 }
 
 function Import-Settings {

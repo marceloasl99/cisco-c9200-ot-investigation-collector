@@ -17,6 +17,8 @@ function Show-CollectorGui {
 
     $ctrl = @{}
     $controlNames = @(
+        'rbModeSaved','rbModeScanStart','rbModeScanPick','rbModeDirect',
+        'pnlSaved','pnlScan','pnlDirect','txtDirectIps','btnCollectNow','lblTargetHint',
         'cmbPreset','btnSavePreset','btnSavePresetAs','btnDeletePreset','lblPresetModified',
         'dgSwitches','btnAddSwitch','btnRemoveSwitch','txtScanRange','btnScan','pbScan','dgScanResults',
         'chkIdentity','chkHealth','chkInterfaces','chkLayer2','chkLayer3','chkSecurity',
@@ -40,6 +42,10 @@ function Show-CollectorGui {
         CollectionRun  = $null
         Running        = $false
         ReportPath     = $null
+        AutoStartAfterScan = $false
+        LastTimerError = ''
+        RunStart       = [datetime]::Now
+        RunInfo        = @{}
         SwitchesData   = New-Object Collections.ObjectModel.ObservableCollection[PSObject]
         ScanData       = New-Object Collections.ObjectModel.ObservableCollection[PSObject]
         ProgressData   = New-Object Collections.ObjectModel.ObservableCollection[PSObject]
@@ -241,7 +247,6 @@ function Show-CollectorGui {
         }
     })
     $ctrl['btnBrowseReport'].Add_Click({
-        $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
         try {
             Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
             $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
@@ -256,39 +261,95 @@ function Show-CollectorGui {
 
     # --- Open folder ---
     $ctrl['btnOpenFolder'].Add_Click({
-        $dir = $ctrl['txtReportDir'].Text
-        if (-not $dir) { $dir = $ScriptRoot }
+        $dir = Resolve-ReportDirectory $ctrl['txtReportDir'].Text $ScriptRoot
         if (Test-Path -LiteralPath $dir) {
             Start-Process explorer.exe -ArgumentList $dir
         }
     })
 
+    # --- Target mode ---
+    function Get-TargetMode {
+        if ($ctrl['rbModeScanStart'].IsChecked) { return 'ScanStart' }
+        if ($ctrl['rbModeDirect'].IsChecked) { return 'Direct' }
+        if ($ctrl['rbModeSaved'].IsChecked) { return 'Saved' }
+        return 'ScanPick'
+    }
+
+    function Update-ModeUi {
+        $mode = Get-TargetMode
+        $ctrl['pnlSaved'].Visibility = if ($mode -eq 'Saved') { 'Visible' } else { 'Collapsed' }
+        $ctrl['pnlDirect'].Visibility = if ($mode -eq 'Direct') { 'Visible' } else { 'Collapsed' }
+        $ctrl['pnlScan'].Visibility = if ($mode -in @('ScanPick', 'ScanStart')) { 'Visible' } else { 'Collapsed' }
+        $ctrl['btnScan'].Visibility = if ($mode -eq 'ScanPick') { 'Visible' } else { 'Collapsed' }
+        $ctrl['lblTargetHint'].Content = switch ($mode) {
+            'ScanPick'  { 'Scan, tick the switches to collect, then click Collect now.' }
+            'ScanStart' { 'Collect now scans the range and then collects from every Cisco switch found.' }
+            'Direct'    { 'Collect now connects straight to the IP address(es) above.' }
+            'Saved'     { 'Collect now uses the enabled switches in the saved list.' }
+        }
+    }
+
+    function Test-RunPrerequisites {
+        $errors = @()
+        if (-not $ctrl['txtUsername'].Text.Trim()) { $errors += 'Username is required (Connection tab)' }
+        if ($ctrl['txtPassword'].SecurePassword.Length -eq 0) { $errors += 'Password is required (Connection tab)' }
+        if (-not (Resolve-PlinkPath -ConfigPath $ctrl['txtPlinkPath'].Text -ScriptRoot $ScriptRoot)) {
+            $errors += 'plink.exe not found (Connection tab)'
+        }
+        return , $errors
+    }
+
     # --- Scan ---
-    $ctrl['btnScan'].Add_Click({
+    function Start-ScanFromUi {
+        param([bool]$AutoStart)
+        if ($null -ne $state.ScanState -and -not $state.ScanState['Done']) {
+            [Windows.MessageBox]::Show('A scan is already running.', 'Scan', 'OK', 'Information')
+            return
+        }
         $range = $ctrl['txtScanRange'].Text.Trim()
         if (-not $range) {
             [Windows.MessageBox]::Show('Enter a scan range (e.g. 10.0.0.0/24)', 'Scan', 'OK', 'Warning')
             return
         }
+        $maxScan = 1024
+        if ($Settings['targets'] -and $Settings['targets']['maxScanHosts']) { $maxScan = [int]$Settings['targets']['maxScanHosts'] }
         try {
-            $hosts = Expand-IPv4Cidr $range
+            $hosts = Expand-IPv4Cidr $range -MaxHosts $maxScan
         } catch {
             [Windows.MessageBox]::Show("Invalid range: $($_.Exception.Message)", 'Scan', 'OK', 'Error')
             return
         }
+        if ($AutoStart) {
+            $problems = Test-RunPrerequisites
+            if ($problems.Count -gt 0) {
+                [Windows.MessageBox]::Show(($problems -join "`n"), 'Before scanning', 'OK', 'Warning')
+                return
+            }
+        }
         $state.ScanData.Clear()
+        $state.AutoStartAfterScan = $AutoStart
         $ctrl['dgScanResults'].Visibility = 'Visible'
         $ctrl['pbScan'].Visibility = 'Visible'
         $ctrl['pbScan'].Maximum = $hosts.Count
         $ctrl['pbScan'].Value = 0
         $ctrl['btnScan'].IsEnabled = $false
+        $ctrl['btnCollectNow'].IsEnabled = $false
         Write-EventLog ("Scan started: {0} hosts in {1}" -f $hosts.Count, $range)
 
         $sshPort = 22
         $conn = $Settings['connection']
         if ($conn -and $conn['sshPort']) { $sshPort = [int]$conn['sshPort'] }
         $state.ScanState = Start-NetworkScan -Hosts $hosts -Port $sshPort
-    })
+    }
+
+    $ctrl['btnScan'].Add_Click({ Start-ScanFromUi -AutoStart $false })
+
+    $ctrl['rbModeScanPick'].Add_Checked({ Update-ModeUi })
+    $ctrl['rbModeScanStart'].Add_Checked({ Update-ModeUi })
+    $ctrl['rbModeDirect'].Add_Checked({ Update-ModeUi })
+    $ctrl['rbModeSaved'].Add_Checked({ Update-ModeUi })
+    if ($state.SwitchesData.Count -gt 0) { $ctrl['rbModeSaved'].IsChecked = $true }
+    Update-ModeUi
 
     # --- Collect selected categories ---
     function Get-SelectedCategories {
@@ -307,26 +368,19 @@ function Show-CollectorGui {
     }
 
     # --- Start collection ---
-    $ctrl['btnStart'].Add_Click({
-        # Validation
+    function Start-Collection {
+        param([array]$Targets)
+        if ($state.Running) { return }
+
+        $enabledSwitches = @($Targets)
         $errors = @()
-        $enabledSwitches = @()
-        foreach ($sw in $state.SwitchesData) {
-            if ($sw.Enabled) {
-                $enabledSwitches += @{ Name = $sw.Name; Ip = $sw.Ip }
-            }
-        }
-        if ($enabledSwitches.Count -eq 0) { $errors += 'No switches enabled' }
-        if (-not $ctrl['txtUsername'].Text.Trim()) { $errors += 'Username is required' }
-        if ($ctrl['txtPassword'].SecurePassword.Length -eq 0) { $errors += 'Password is required' }
-
-        $plinkPath = Resolve-PlinkPath -ConfigPath $ctrl['txtPlinkPath'].Text -ScriptRoot $ScriptRoot
-        if (-not $plinkPath) { $errors += 'plink.exe not found' }
-
+        if ($enabledSwitches.Count -eq 0) { $errors += 'No switches selected' }
+        $errors += Test-RunPrerequisites
         if ($errors.Count -gt 0) {
             [Windows.MessageBox]::Show(($errors -join "`n"), 'Validation', 'OK', 'Warning')
             return
         }
+        $plinkPath = Resolve-PlinkPath -ConfigPath $ctrl['txtPlinkPath'].Text -ScriptRoot $ScriptRoot
 
         $cats = Get-SelectedCategories
         $logSources = @()
@@ -334,18 +388,32 @@ function Show-CollectorGui {
         if ($ctrl['chkLogReboot'].IsChecked) { $logSources += 'RebootHistory' }
 
         $vlanMode = 'All'
-        $vlanList = @()
+        [int[]]$vlanList = @()
         if ($ctrl['rbVlanOnly'].IsChecked) {
             $vlanMode = 'Only'
-            $vlanList = $ctrl['txtVlans'].Text.Trim()
+            try {
+                [int[]]$vlanList = @(Parse-VlanList $ctrl['txtVlans'].Text)
+            } catch {
+                [Windows.MessageBox]::Show($_.Exception.Message, 'VLANs', 'OK', 'Warning')
+                return
+            }
+            if ($vlanList.Count -eq 0) {
+                [Windows.MessageBox]::Show('Enter at least one VLAN, or select "All".', 'VLANs', 'OK', 'Warning')
+                return
+            }
         }
         $macList = @()
         $macText = $ctrl['txtMacs'].Text.Trim()
-        if ($macText) { $macList = ($macText -split '[,;\s]+') | Where-Object { $_ -ne '' } }
+        if ($macText) { $macList = @(($macText -split '[,;\s]+') | Where-Object { $_ -ne '' }) }
+        try {
+            foreach ($m in $macList) { ConvertTo-CiscoMac $m | Out-Null }
+        } catch {
+            [Windows.MessageBox]::Show($_.Exception.Message, 'MAC addresses', 'OK', 'Warning')
+            return
+        }
 
-        $catalog = New-CommandCatalog
-        $cmds = Build-CommandList -Catalog $catalog -Categories $cats `
-            -VlanMode $vlanMode -VlanList $vlanList -Macs $macList -LogSources $logSources
+        $cmds = Build-CommandList -Categories $cats -Vlans $vlanList `
+            -VlanMode $vlanMode -Macs $macList -LogSources $logSources
 
         $supportsPwFile = Test-PlinkPwFileSupport $plinkPath
         if ($supportsPwFile) {
@@ -378,6 +446,14 @@ function Show-CollectorGui {
             -SupportsPwFile $supportsPwFile -MaxParallel $maxPar `
             -PerSwitchTimeoutSeconds $timeout -HostKeyResolutions $hostKeyResolutions
 
+        $state.RunStart = [datetime]::Now
+        $state.RunInfo = @{
+            Username       = $ctrl['txtUsername'].Text
+            PlinkPath      = $plinkPath
+            SupportsPwFile = $supportsPwFile
+            CommandCount   = $cmds.Count
+            MaxParallel    = $maxPar
+        }
         $state.Running = $true
         $state.ProgressData.Clear()
         foreach ($sw in $state.CollectionRun.SwitchStates) {
@@ -394,6 +470,7 @@ function Show-CollectorGui {
         }
 
         $ctrl['btnStart'].IsEnabled = $false
+        $ctrl['btnCollectNow'].IsEnabled = $false
         $ctrl['btnCancel'].IsEnabled = $true
         $ctrl['lblRunStatus'].Content = 'Collecting...'
         $ctrl['pbRun'].Maximum = $enabledSwitches.Count
@@ -402,14 +479,75 @@ function Show-CollectorGui {
 
         Write-EventLog ("Collection started: {0} switches, {1} commands, max parallel {2}" -f `
             $enabledSwitches.Count, $cmds.Count, $maxPar)
+    }
+
+    function Invoke-CollectNow {
+        if ($state.Running) {
+            [Windows.MessageBox]::Show('A collection is already running.', 'Collect', 'OK', 'Information')
+            return
+        }
+        $mode = Get-TargetMode
+        $targets = @()
+        switch ($mode) {
+            'ScanStart' {
+                Start-ScanFromUi -AutoStart $true
+                return
+            }
+            'Direct' {
+                try { $targets = @(Parse-DirectIpList $ctrl['txtDirectIps'].Text) }
+                catch {
+                    [Windows.MessageBox]::Show($_.Exception.Message, 'Switch IP address', 'OK', 'Warning')
+                    return
+                }
+                if ($targets.Count -eq 0) {
+                    [Windows.MessageBox]::Show('Type at least one switch IP address.', 'Switch IP address', 'OK', 'Warning')
+                    return
+                }
+            }
+            'ScanPick' {
+                if ($null -ne $state.ScanState -and -not $state.ScanState['Done']) {
+                    [Windows.MessageBox]::Show('Wait for the scan to finish.', 'Collect', 'OK', 'Information')
+                    return
+                }
+                if ($state.ScanData.Count -eq 0) {
+                    [Windows.MessageBox]::Show('Run a scan first, then tick the switches to collect.', 'Collect', 'OK', 'Information')
+                    return
+                }
+                foreach ($row in $state.ScanData) {
+                    if ($row.Use) { $targets += @{ Name = [string]$row.Ip; Ip = [string]$row.Ip } }
+                }
+            }
+            'Saved' {
+                foreach ($sw in $state.SwitchesData) {
+                    if ($sw.Enabled) { $targets += @{ Name = [string]$sw.Name; Ip = [string]$sw.Ip } }
+                }
+            }
+        }
+        Start-Collection -Targets $targets
+    }
+
+    $ctrl['btnStart'].Add_Click({
+        try { Invoke-CollectNow }
+        catch { [Windows.MessageBox]::Show($_.Exception.Message, 'Collect', 'OK', 'Error') }
+    })
+    $ctrl['btnCollectNow'].Add_Click({
+        try { Invoke-CollectNow }
+        catch { [Windows.MessageBox]::Show($_.Exception.Message, 'Collect', 'OK', 'Error') }
     })
 
     # --- Cancel ---
     $ctrl['btnCancel'].Add_Click({
-        if ($state.CollectionRun) {
+        if ($null -ne $state.ScanState -and -not $state.ScanState['Done']) {
+            Stop-NetworkScan $state.ScanState
+            $state.AutoStartAfterScan = $false
+            $ctrl['btnScan'].IsEnabled = $true
+            $ctrl['btnCollectNow'].IsEnabled = $true
+            Write-EventLog 'Scan cancelled by user'
+        }
+        if ($state.Running -and $state.CollectionRun) {
             Stop-CollectionRun $state.CollectionRun
             $state.Running = $false
-            $ctrl['btnStart'].IsEnabled = $true
+            $ctrl['btnStart'].IsEnabled = $true; $ctrl['btnCollectNow'].IsEnabled = $true
             $ctrl['btnCancel'].IsEnabled = $false
             $ctrl['lblRunStatus'].Content = 'Cancelled'
             Write-EventLog 'Collection cancelled by user'
@@ -431,14 +569,12 @@ function Show-CollectorGui {
             # Scan tick
             if ($null -ne $state.ScanState -and -not $state.ScanState['Done']) {
                 Step-NetworkScan $state.ScanState
-                $completed = 0
-                foreach ($r in $state.ScanState['Results']) {
-                    if ($r['PingReply'] -ne $null -or $r['TcpOpen'] -ne $null) { $completed++ }
-                }
+                $completed = @($state.ScanState['Probes'] | Where-Object { $_['Completed'] }).Count
                 $ctrl['pbScan'].Value = $completed
 
                 if ($state.ScanState['Done']) {
                     $ctrl['btnScan'].IsEnabled = $true
+                    $ctrl['btnCollectNow'].IsEnabled = $true
                     $state.ScanData.Clear()
                     $ciscoCount = 0
                     $sshCount = 0
@@ -461,6 +597,17 @@ function Show-CollectorGui {
                     }
                     Write-EventLog ("Scan finished: {0} probed, {1} SSH open, {2} Cisco" -f `
                         $state.ScanState['Results'].Count, $sshCount, $ciscoCount)
+
+                    if ($state.AutoStartAfterScan) {
+                        $state.AutoStartAfterScan = $false
+                        $found = @(Get-CiscoScanTargets $state.ScanState['Results'])
+                        if ($found.Count -eq 0) {
+                            Write-EventLog 'No Cisco SSH switches found; nothing to collect.'
+                            [Windows.MessageBox]::Show('The scan found no Cisco SSH switches in that range.', 'Scan', 'OK', 'Information')
+                        } else {
+                            Start-Collection -Targets $found
+                        }
+                    }
                 }
             }
 
@@ -483,21 +630,21 @@ function Show-CollectorGui {
                     if ($sw['Status'] -notin @('Queued','Collecting')) { $doneCount++ }
                 }
                 $ctrl['pbRun'].Value = $doneCount
-                $running = ($state.CollectionRun.SwitchStates | Where-Object { $_['Status'] -eq 'Collecting' }).Count
-                $queued = ($state.CollectionRun.SwitchStates | Where-Object { $_['Status'] -eq 'Queued' }).Count
+                $running = @($state.CollectionRun.SwitchStates | Where-Object { $_['Status'] -eq 'Collecting' }).Count
+                $queued = @($state.CollectionRun.SwitchStates | Where-Object { $_['Status'] -eq 'Queued' }).Count
                 $ctrl['lblRunStatus'].Content = "Collecting: $running running, $queued queued, $doneCount done"
 
                 $ctrl['dgRunProgress'].Items.Refresh()
 
                 if ($state.CollectionRun.Done) {
                     $state.Running = $false
-                    $ctrl['btnStart'].IsEnabled = $true
+                    $ctrl['btnStart'].IsEnabled = $true; $ctrl['btnCollectNow'].IsEnabled = $true
                     $ctrl['btnCancel'].IsEnabled = $false
 
                     # Build report
                     try {
-                        $reportDir = $ctrl['txtReportDir'].Text
-                        if (-not $reportDir) { $reportDir = $ScriptRoot }
+                        $reportDir = Resolve-ReportDirectory $ctrl['txtReportDir'].Text $ScriptRoot
+                        [IO.Directory]::CreateDirectory($reportDir) | Out-Null
                         $stamp = (Get-Date).ToString('yyyyMMdd_HHmmss')
                         $reportName = "Cisco_C9200_OT_Investigation_$stamp.txt"
                         $reportPath = Join-Path $reportDir $reportName
@@ -517,23 +664,53 @@ function Show-CollectorGui {
                         $presetName = ''
                         if ($ctrl['cmbPreset'].SelectedItem) { $presetName = [string]$ctrl['cmbPreset'].SelectedItem }
 
-                        $header = New-ReportHeader -PresetName $presetName `
-                            -Categories (Get-SelectedCategories) `
-                            -LogDays $logDays -SwitchCount $state.CollectionRun.SwitchStates.Count
-
-                        $blocks = @()
-                        foreach ($sw in $state.CollectionRun.SwitchStates) {
-                            $blocks += New-SwitchBlock -Name $sw['Name'] -Ip $sw['Ip'] `
-                                -Status $sw['Status'] -StdOut $sw['StdOut'] -StdErr $sw['StdErr'] `
-                                -HostKey $sw['HostKey'] -KeySource $sw['KeySource'] `
-                                -ExitCode $sw['ExitCode'] -TimedOut $sw['TimedOut'] `
-                                -LogDays $logDays
+                        $runEnd = [datetime]::Now
+                        $header = New-ReportHeader -Params @{
+                            StartTime      = $state.RunStart
+                            Username       = $state.RunInfo['Username']
+                            PresetName     = $presetName
+                            SwitchCount    = $state.CollectionRun.SwitchStates.Count
+                            PlinkPath      = $state.RunInfo['PlinkPath']
+                            SupportsPwFile = $state.RunInfo['SupportsPwFile']
+                            CommandCount   = $state.RunInfo['CommandCount']
+                            MaxParallel    = $state.RunInfo['MaxParallel']
                         }
 
-                        $summary = New-CollectionSummary $state.CollectionRun.SwitchStates
+                        $blocks = @()
+                        $summaryRows = @()
+                        foreach ($sw in $state.CollectionRun.SwitchStates) {
+                            $started = if ($sw['Started']) { $sw['Started'] } else { $state.RunStart }
+                            $finished = if ($sw['Finished']) { $sw['Finished'] } else { $runEnd }
+                            $blocks += New-SwitchBlock -Params @{
+                                Name       = $sw['Name']
+                                Ip         = $sw['Ip']
+                                Started    = $started
+                                Finished   = $finished
+                                HostKey    = $sw['HostKey']
+                                KeySource  = $sw['KeySource']
+                                LogSummary = ''
+                                StdOut     = [string]$sw['StdOut']
+                                StdErr     = [string]$sw['StdErr']
+                                ExitCode   = $sw['ExitCode']
+                                TimedOut   = $sw['TimedOut']
+                            }
+                            $summaryRows += @{
+                                Name        = $sw['Name']
+                                Ip          = $sw['Ip']
+                                Status      = $sw['Status']
+                                Duration    = ('{0:N0}s' -f ($finished - $started).TotalSeconds)
+                                KB          = ('{0:N1}' -f ($sw['BytesRead'] / 1024))
+                                LogCoverage = ''
+                                Notes       = if ($sw['TimedOut']) { 'timed out' } else { '' }
+                            }
+                        }
+
+                        $summary = New-CollectionSummary -SwitchResults $summaryRows `
+                            -RunStart $state.RunStart -RunEnd $runEnd
 
                         $utf8NoBom = New-Object Text.UTF8Encoding($false)
-                        $content = $header + ($blocks -join "`r`n") + "`r`n" + $summary
+                        $nl = [Environment]::NewLine
+                        $content = $header + $nl + ($blocks -join $nl) + $nl + $summary + $nl
                         [IO.File]::WriteAllText($reportPath, $content, $utf8NoBom)
 
                         $ctrl['btnOpenReport'].IsEnabled = $true
@@ -563,7 +740,11 @@ function Show-CollectorGui {
             }
         }
         catch {
-            try { Write-EventLog "Timer error: $($_.Exception.Message)" } catch {}
+            $msg = $_.Exception.Message
+            if ($state.LastTimerError -ne $msg) {
+                $state.LastTimerError = $msg
+                try { Write-EventLog "Timer error: $msg" } catch {}
+            }
         }
     })
     $timer.Start()

@@ -130,6 +130,16 @@ Describe 'Save-Settings and Import-Settings roundtrip' {
         $loaded.connection.maxParallel | Should -Be 6
         $loaded.connection.username | Should -Be 'network-admin'
     }
+
+    It 'overwrites an existing settings file' {
+        $s = Get-DefaultSettings
+        $s.connection.maxParallel = 3
+        Save-Settings $s $tempFile
+        $s.connection.maxParallel = 7
+        Save-Settings $s $tempFile
+        (Import-Settings $tempFile).connection.maxParallel | Should -Be 7
+        Test-Path -LiteralPath ($tempFile + '.tmp') | Should -BeFalse
+    }
 }
 
 Describe 'Get-PresetByName' {

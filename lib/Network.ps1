@@ -80,6 +80,38 @@ function New-ScanResult {
     }
 }
 
+function Parse-DirectIpList {
+    param([string]$Text)
+    $targets = New-Object Collections.Generic.List[hashtable]
+    $seen = @{}
+    foreach ($token in ($Text -split '[,;\s]+')) {
+        if ($token -eq '') { continue }
+        if ($token -notmatch '^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$') {
+            throw "Invalid IP address: $token (enter single IPv4 addresses; use Scan for ranges)"
+        }
+        $octets = @($Matches[1], $Matches[2], $Matches[3], $Matches[4]) | ForEach-Object { [int]$_ }
+        if (($octets | Where-Object { $_ -gt 255 })) {
+            throw "Invalid IP address: $token (octet above 255)"
+        }
+        $ip = $octets -join '.'
+        if ($seen.ContainsKey($ip)) { continue }
+        $seen[$ip] = $true
+        $targets.Add(@{ Name = $ip; Ip = $ip })
+    }
+    return $targets.ToArray()
+}
+
+function Get-CiscoScanTargets {
+    param([array]$Results)
+    $targets = New-Object Collections.Generic.List[hashtable]
+    foreach ($r in $Results) {
+        if ($r['IsCisco']) {
+            $targets.Add(@{ Name = $r['Ip']; Ip = $r['Ip'] })
+        }
+    }
+    return $targets.ToArray()
+}
+
 function Test-CiscoBanner {
     param([string]$Banner)
     if ([string]::IsNullOrEmpty($Banner)) { return $false }
@@ -247,4 +279,15 @@ function Step-NetworkScan {
     if ($State.Index -ge $State.Hosts.Count -and $remaining -eq 0) {
         $State.Done = $true
     }
+}
+
+function Stop-NetworkScan {
+    param([hashtable]$State)
+    foreach ($probe in $State.Probes) {
+        if ($probe['Completed']) { continue }
+        if ($null -ne $probe['TcpClient']) { try { $probe['TcpClient'].Dispose() } catch {} }
+        if ($probe.ContainsKey('Pinger') -and $null -ne $probe['Pinger']) { try { $probe['Pinger'].Dispose() } catch {} }
+        $probe['Completed'] = $true
+    }
+    $State.Done = $true
 }
