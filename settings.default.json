@@ -1,0 +1,165 @@
+{
+  "hostKeys": {},
+  "connection": {
+    "sshPort": 22,
+    "maxParallel": 4,
+    "onHostKeyChange": "Block",
+    "perSwitchTimeoutSeconds": 175,
+    "connectTimeoutSeconds": 5,
+    "hostKeyPolicy": "AutoAccept",
+    "username": "network-admin",
+    "plinkPath": ""
+  },
+  "presets": [
+    {
+      "name": "Quick triage (3 days)",
+      "vlans": {
+        "list": [],
+        "mode": "All"
+      },
+      "description": "Fast overview with 3-day log window",
+      "logs": {
+        "days": 3,
+        "sources": [
+          "Buffer"
+        ]
+      },
+      "macs": [],
+      "categories": [
+        "Identity",
+        "Health",
+        "Interfaces",
+        "Layer2",
+        "Layer3",
+        "Security",
+        "ConfigExtracts",
+        "Logs"
+      ]
+    },
+    {
+      "name": "Standard investigation (30 days)",
+      "vlans": {
+        "list": [],
+        "mode": "All"
+      },
+      "description": "Full investigation with 30-day log window",
+      "logs": {
+        "days": 30,
+        "sources": [
+          "Buffer",
+          "RebootHistory"
+        ]
+      },
+      "macs": [],
+      "categories": [
+        "Identity",
+        "Health",
+        "Interfaces",
+        "Layer2",
+        "Layer3",
+        "Security",
+        "ConfigExtracts",
+        "Logs",
+        "Detailed"
+      ]
+    },
+    {
+      "name": "Deep investigation (90 days)",
+      "vlans": {
+        "list": [],
+        "mode": "All"
+      },
+      "description": "Deep investigation with 90-day log window and running config",
+      "logs": {
+        "days": 90,
+        "sources": [
+          "Buffer",
+          "RebootHistory"
+        ]
+      },
+      "macs": [],
+      "categories": [
+        "Identity",
+        "Health",
+        "Interfaces",
+        "Layer2",
+        "Layer3",
+        "Security",
+        "ConfigExtracts",
+        "Logs",
+        "Detailed",
+        "SanitizedRunningConfig"
+      ]
+    },
+    {
+      "name": "Logs only",
+      "vlans": {
+        "list": [],
+        "mode": "All"
+      },
+      "description": "Collect identity and logs only",
+      "logs": {
+        "days": 30,
+        "sources": [
+          "Buffer",
+          "RebootHistory"
+        ]
+      },
+      "macs": [],
+      "categories": [
+        "Identity",
+        "Logs"
+      ]
+    },
+    {
+      "name": "VLAN focus",
+      "vlans": {
+        "list": [],
+        "mode": "Only"
+      },
+      "description": "Layer 2 investigation for specific VLANs",
+      "logs": {
+        "days": 3,
+        "sources": [
+          "Buffer"
+        ]
+      },
+      "macs": [],
+      "categories": [
+        "Identity",
+        "Layer2",
+        "Logs"
+      ]
+    },
+    {
+      "name": "MAC trace",
+      "vlans": {
+        "list": [],
+        "mode": "All"
+      },
+      "description": "Trace specific MAC addresses across switches",
+      "logs": {
+        "days": 0,
+        "sources": []
+      },
+      "macs": [],
+      "categories": [
+        "Identity",
+        "Layer2",
+        "Layer3"
+      ]
+    }
+  ],
+  "lastUsed": {},
+  "targets": {
+    "switches": [],
+    "includeNonCiscoSsh": false,
+    "scanRanges": [
+      "192.0.2.0/24"
+    ],
+    "maxScanHosts": 1024
+  },
+  "report": {
+    "directory": "."
+  }
+}
