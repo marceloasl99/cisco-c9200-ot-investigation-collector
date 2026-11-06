@@ -10,6 +10,94 @@ function Resolve-ReportDirectory {
     return [IO.Path]::GetFullPath((Join-Path $ScriptRoot $Directory))
 }
 
+function New-LogAnalysis {
+    param(
+        [string]$Output,
+        [int]$Days,
+        [datetime]$FallbackDate
+    )
+    $nl = [Environment]::NewLine
+    $clockPattern = '(?m)^[*.]?\d{1,2}:\d{2}:\d{2}(?:\.\d+)?\s+\w+\s+\w+\s+[A-Z][a-z]{2}\s+\d{1,2}\s+\d{4}\s*$'
+    $reference = $FallbackDate
+    $source = 'PC clock'
+    $notes = @()
+    $clockMatch = [regex]::Match($Output, $clockPattern)
+    if ($clockMatch.Success) {
+        $clock = Parse-ShowClock $clockMatch.Value.Trim()
+        if ($clock) {
+            $reference = $clock.DateTime
+            $source = 'switch clock'
+            if ($clockMatch.Value.TrimStart().StartsWith('*')) {
+                $notes += 'The switch clock is not synchronised (no time source), so event times may be off.'
+            }
+        }
+    }
+    if ($source -eq 'PC clock') {
+        $notes += 'show clock was not readable; the PC clock was used as the reference for the period.'
+    }
+
+    $all = @(Get-LogEntries -LogText $Output -ReferenceYear $reference)
+    $window = @(Filter-LogByDays -Entries $all -Days $Days -ReferenceDate $reference)
+    $periodText = if ($Days -gt 0) { "last $Days days" } else { 'all entries' }
+    $result = @{
+        Reference       = $reference
+        ReferenceSource = $source
+        TotalEntries    = $all.Count
+        InWindowCount   = $window.Count
+        EntriesText     = ''
+        CoverageShort   = ''
+        Summary         = ''
+    }
+
+    $head = "Period: $periodText (reference: $source $($reference.ToString('yyyy-MM-dd HH:mm:ss')))"
+    if ($all.Count -eq 0) {
+        $result.CoverageShort = 'no entries'
+        $result.Summary = $head + $nl + 'No syslog entries found in the output (logging disabled, empty buffer, or the command failed).'
+        return $result
+    }
+
+    $cov = Get-LogCoverage -Entries $all -ReferenceDate $reference -RequestedDays $Days
+    $buf = Parse-LogBufferHeader $Output
+    $lines = New-Object Collections.Generic.List[string]
+    $lines.Add($head)
+    if ($buf.MessagesLogged -gt 0) {
+        $lines.Add("Log buffer       : $($buf.BufferSize) bytes, $($buf.MessagesLogged) messages logged")
+    }
+    $lines.Add("Entries parsed   : $($all.Count) in output, $($window.Count) inside the period")
+    if ($cov.OldestEntry) {
+        $lines.Add("Oldest / newest  : $($cov.OldestEntry.ToString('yyyy-MM-dd HH:mm:ss')) / $($cov.NewestEntry.ToString('yyyy-MM-dd HH:mm:ss'))")
+        $reach = [math]::Floor(($reference - $cov.OldestEntry).TotalDays)
+        if ($Days -le 0) {
+            $lines.Add("Coverage         : buffer reaches back $reach days (all entries requested)")
+            $result.CoverageShort = "reaches $reach d"
+        }
+        elseif ($cov.Covered) {
+            $lines.Add("Coverage         : buffer reaches back $reach days, requested $Days days: covered")
+            $result.CoverageShort = "$Days d covered"
+        }
+        else {
+            $lines.Add("Coverage         : buffer reaches back only $reach days, requested $Days days: NOT COVERED (older events may have been overwritten)")
+            $result.CoverageShort = "$Days d NOT covered ($reach d)"
+        }
+    }
+    else {
+        $lines.Add('Coverage         : entries have no readable timestamps, so the period could not be applied.')
+        $result.CoverageShort = 'no timestamps'
+    }
+    $sev = Get-SeveritySummary $window
+    $sevText = ($sev.Keys | Sort-Object { [int]$_ } | ForEach-Object { "$_=$($sev[$_])" }) -join ', '
+    if ($sevText) { $lines.Add("Severity (period): $sevText") }
+    $top = @(Get-TopMnemonics -Entries $window -TopN 10)
+    if ($top.Count -gt 0) {
+        $lines.Add('Top mnemonics    : ' + (($top | ForEach-Object { "$($_.Mnemonic) x$($_.Count)" }) -join ', '))
+    }
+    foreach ($n in $notes) { $lines.Add("Note             : $n") }
+
+    $result.Summary = ($lines -join $nl)
+    $result.EntriesText = (($window | ForEach-Object { $_.RawLine }) -join $nl)
+    return $result
+}
+
 function New-ReportHeader {
     param([hashtable]$Params)
     $lines = @(
@@ -38,15 +126,25 @@ function New-SwitchBlock {
     $lines.Add('##############################################################################')
     $lines.Add("SWITCH: $($Params.Name) ($($Params.Ip))")
     $lines.Add("START : $($Params.Started.ToString('yyyy-MM-dd HH:mm:ss'))")
-    if ($Params.HostKey) {
-        $lines.Add("HOST KEY: $($Params.HostKey) (source: $($Params.KeySource))")
+    if ($Params['HostKey']) {
+        $lines.Add("HOST KEY: $($Params['HostKey']) (source: $($Params['KeySource']))")
+    }
+    if ($Params['Note']) {
+        $lines.Add("NOTE : $($Params['Note'])")
     }
     $lines.Add('##############################################################################')
     $lines.Add('')
 
-    if ($Params.LogSummary) {
+    if ($Params['LogSummary']) {
         $lines.Add('LOG SUMMARY:')
-        $lines.Add("  $($Params.LogSummary)")
+        $lines.Add("  $($Params['LogSummary'])".Replace([Environment]::NewLine, [Environment]::NewLine + '  '))
+        $lines.Add('')
+    }
+
+    if ($Params['LogEntriesText']) {
+        $lines.Add("LOG ENTRIES - LAST $($Params['LogDays']) DAYS:")
+        $lines.Add('------------------------------------------------------------------------------')
+        $lines.Add($Params['LogEntriesText'].TrimEnd())
         $lines.Add('')
     }
 

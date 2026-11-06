@@ -44,6 +44,24 @@ Describe 'Parse-CiscoTimestamp' {
     }
 }
 
+Describe 'Parse-CiscoTimestamp with a reference date' {
+    It 'puts a December entry in the previous year when the switch clock is in January' {
+        $ref = [datetime]::new(2027, 1, 10, 12, 0, 0)
+        $ts = Parse-CiscoTimestamp '*Dec 20 10:00:00.000' $ref
+        $ts | Should -Be ([datetime]::new(2026, 12, 20, 10, 0, 0))
+    }
+
+    It 'keeps an entry from the same month in the reference year' {
+        $ref = [datetime]::new(2027, 1, 10, 12, 0, 0)
+        $ts = Parse-CiscoTimestamp '*Jan  9 08:00:00.000' $ref
+        $ts | Should -Be ([datetime]::new(2027, 1, 9, 8, 0, 0))
+    }
+
+    It 'still accepts a plain year number' {
+        (Parse-CiscoTimestamp '*Mar  1 00:00:00.000' 2026).Year | Should -Be 2026
+    }
+}
+
 Describe 'Parse-ShowClock' {
     It 'parses standard show clock detail output' {
         $clockText = '*14:25:30.123 UTC Wed Nov 3 2026'

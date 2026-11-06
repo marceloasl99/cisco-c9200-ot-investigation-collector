@@ -11,7 +11,9 @@ function New-CollectionRun {
         [int]$MaxParallel = 4,
         [int]$PerSwitchTimeoutSeconds = 175,
         [int]$SshPort = 22,
-        [hashtable]$HostKeyResolutions = @{}
+        [hashtable]$HostKeyResolutions = @{},
+        [string]$HostKeyPolicy = 'AutoAccept',
+        $KnownHostsStore = $null
     )
 
     $seen = @{}
@@ -77,6 +79,8 @@ function New-CollectionRun {
             BytesRead = 0
             HostKey   = ''
             KeySource = ''
+            Retries   = 0
+            Note      = ''
         }
     }
 
@@ -95,6 +99,8 @@ function New-CollectionRun {
         Timeout      = $PerSwitchTimeoutSeconds
         SshPort      = $SshPort
         HostKeyResolutions = $HostKeyResolutions
+        HostKeyPolicy = $HostKeyPolicy
+        KnownHostsStore = $KnownHostsStore
         Done         = $false
         Cancelled    = $false
         RunningIPs   = @{}
@@ -125,6 +131,30 @@ function Step-CollectionRun {
             $process.Dispose()
             $Run.RunningIPs.Remove($sw['Ip'])
             $Run.ActiveCount--
+
+            if ($sw['ExitCode'] -ne 0) {
+                $act = Get-HostKeyAction -Output ($sw['StdErr'] + "`n" + $sw['StdOut']) `
+                    -HadKey ([bool]$sw['HostKey']) -Retries $sw['Retries'] -Policy $Run.HostKeyPolicy
+                if ($act.Action -eq 'Retry') {
+                    $Run.HostKeyResolutions[$sw['Ip']] = @{ Source = 'auto-accepted on first use'; Fingerprint = $act.Fingerprint }
+                    if ($null -ne $Run.KnownHostsStore) {
+                        Set-KnownHostKey -Store $Run.KnownHostsStore -Ip $sw['Ip'] -Fingerprint $act.Fingerprint -Algorithm $act.Algorithm
+                    }
+                    $sw['Retries']++
+                    $sw['Note'] = $act.Note
+                    $sw['Process'] = $null
+                    $sw['Started'] = $null
+                    $sw['Finished'] = $null
+                    $sw['StdOut'] = ''
+                    $sw['StdErr'] = ''
+                    $sw['BytesRead'] = 0
+                    $sw['Status'] = 'Queued'
+                }
+                elseif ($act.Action -eq 'Skip') {
+                    $sw['Note'] = $act.Note
+                    $sw['Status'] = 'Skipped'
+                }
+            }
         }
         elseif ($elapsed -ge $Run.Timeout) {
             $sw['TimedOut'] = $true
