@@ -227,9 +227,7 @@ function New-CiscoCommandList {
         'show running-config | include ^hostname|^ip default-gateway|^ip route|^ntp|^clock timezone|^logging host|^snmp-server location'
     )) { $commands.Add($cmd) }
 
-    # Recent device messages. On IOS-XE, unsupported output modifiers are captured
-    # as CLI errors in the report instead of stopping the collection.
-    $commands.Add('show logging | last 300')
+    $commands.Add('show logging')
 
     if ($CollectionMode -ne 'Fast') {
         foreach ($cmd in @(
@@ -267,19 +265,19 @@ function Invoke-SwitchCollection {
     $passwordFile = Join-Path $TempRoot ("password_{0}.txt" -f $safeName)
     [IO.File]::WriteAllLines($commandFile, $Commands, $Utf8NoBom)
 
-    $args = New-Object Collections.Generic.List[string]
-    $args.Add('-ssh')
-    $args.Add('-t')
-    $args.Add('-batch')
-    $args.Add('-noagent')
-    $args.Add('-P')
-    $args.Add('22')
-    $args.Add('-l')
-    $args.Add($User)
+    $plinkArgs = New-Object Collections.Generic.List[string]
+    $plinkArgs.Add('-ssh')
+    $plinkArgs.Add('-t')
+    $plinkArgs.Add('-batch')
+    $plinkArgs.Add('-noagent')
+    $plinkArgs.Add('-P')
+    $plinkArgs.Add('22')
+    $plinkArgs.Add('-l')
+    $plinkArgs.Add($User)
 
     if ($HostKeys.Contains($Ip)) {
-        $args.Add('-hostkey')
-        $args.Add([string]$HostKeys[$Ip])
+        $plinkArgs.Add('-hostkey')
+        $plinkArgs.Add([string]$HostKeys[$Ip])
     }
 
     if ($SupportsPwFile) {
@@ -295,24 +293,21 @@ function Invoke-SwitchCollection {
             $acl.SetAccessRule($rule)
             Set-Acl -LiteralPath $passwordFile -AclObject $acl
         } catch {}
-        $args.Add('-pwfile')
-        $args.Add($passwordFile)
+        $plinkArgs.Add('-pwfile')
+        $plinkArgs.Add($passwordFile)
     }
     else {
-        # Compatibility fallback for older Plink releases. The password can be
-        # briefly visible to local process-inspection tools; update PuTTY/Plink
-        # to a release supporting -pwfile whenever possible.
-        $args.Add('-pw')
-        $args.Add($Password)
+        $plinkArgs.Add('-pw')
+        $plinkArgs.Add($Password)
     }
 
-    $args.Add($Ip)
-    $args.Add('-m')
-    $args.Add($commandFile)
+    $plinkArgs.Add($Ip)
+    $plinkArgs.Add('-m')
+    $plinkArgs.Add($commandFile)
 
     $psi = New-Object Diagnostics.ProcessStartInfo
     $psi.FileName = $Plink
-    $psi.Arguments = (($args | ForEach-Object { Quote-ProcessArgument ([string]$_) }) -join ' ')
+    $psi.Arguments = (($plinkArgs | ForEach-Object { Quote-ProcessArgument ([string]$_) }) -join ' ')
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
     $psi.RedirectStandardOutput = $true
@@ -360,7 +355,18 @@ function Invoke-SwitchCollection {
 $PlainPassword = $null
 try {
     $PlinkResolved = Resolve-Plink
-    $plinkHelp = (& $PlinkResolved -h 2>&1 | Out-String)
+    $plinkHelpPsi = New-Object Diagnostics.ProcessStartInfo
+    $plinkHelpPsi.FileName = $PlinkResolved
+    $plinkHelpPsi.Arguments = '--help'
+    $plinkHelpPsi.UseShellExecute = $false
+    $plinkHelpPsi.CreateNoWindow = $true
+    $plinkHelpPsi.RedirectStandardOutput = $true
+    $plinkHelpPsi.RedirectStandardError = $true
+    $plinkHelpProc = [Diagnostics.Process]::Start($plinkHelpPsi)
+    $plinkHelpOut = $plinkHelpProc.StandardOutput.ReadToEnd()
+    $plinkHelpErr = $plinkHelpProc.StandardError.ReadToEnd()
+    $plinkHelpProc.WaitForExit(5000) | Out-Null
+    $plinkHelp = $plinkHelpOut + $plinkHelpErr
     $SupportsPwFile = $plinkHelp -match '(?m)^\s*-pwfile\s'
     $Commands = New-CiscoCommandList -CollectionMode $Mode
 
