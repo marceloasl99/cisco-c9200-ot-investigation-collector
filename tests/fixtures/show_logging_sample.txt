@@ -1,0 +1,32 @@
+Syslog logging: enabled (0 messages dropped, 3 messages rate-limited, 0 flushes, 0 overflows, xml disabled, filtering disabled)
+
+No Active Message Discriminator.
+
+No Inactive Message Discriminator.
+
+    Console logging: disabled
+    Monitor logging: level debugging, 0 messages logged, xml disabled,
+                     filtering disabled
+    Buffer logging:  level debugging, 1247 messages logged, xml disabled,
+                    filtering disabled
+    Exception Logging: size (4096 bytes)
+    Count and timestamp logging messages: disabled
+    File logging: disabled
+    Persistent logging: disabled
+
+No active filter modules.
+
+    Trap logging: level informational, 982 facility, 0 severity
+                  Port 514, 0 messages logged
+
+Log Buffer (16384 bytes):
+
+*Nov  3 14:22:01.123: %LINK-3-UPDOWN: Interface GigabitEthernet1/0/1, changed state to down
+*Nov  3 14:22:03.456: %LINK-3-UPDOWN: Interface GigabitEthernet1/0/1, changed state to up
+*Nov  3 14:23:15.789: %LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet1/0/1, changed state to up
+*Nov  2 08:15:00.000: %SYS-5-CONFIG_I: Configured from console by admin on vty0 (10.20.30.1)
+*Oct 30 12:00:00.000: %PM-4-ERR_DISABLE: bpduguard error detected on Gi1/0/24, putting Gi1/0/24 in err-disable state
+*Oct 15 09:30:00.000: %LINK-3-UPDOWN: Interface GigabitEthernet1/0/5, changed state to down
+*Sep  1 00:00:00.000: %SYS-5-RESTART: System restarted --
+Cisco IOS Software [Amsterdam], Catalyst L3 Switch Software (CAT9K_LITE_IOSXE), Version 17.06.05, RELEASE SOFTWARE (fc3)
+*Aug 15 10:00:00.000: %STACKMGR-4-SWITCH_ADDED: Switch 1 has been added to the stack.
