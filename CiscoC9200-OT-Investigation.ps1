@@ -2,15 +2,66 @@ param(
     [ValidateSet('Fast','Standard','Deep')]
     [string]$Mode = 'Standard',
 
-    [ValidateRange(60,180)]
+    [ValidateRange(60,900)]
     [int]$PerSwitchTimeoutSeconds = 175,
 
+    [ValidateRange(1,30)]
+    [int]$SshConnectTimeoutSeconds = 5,
+
+    [switch]$NoGui,
+
+    [string]$Preset,
+
+    [string]$SettingsPath,
+
+    [switch]$Scan,
+
+    [int]$LogDays = -1,
+
+    [string[]]$LogSources,
+
+    [string]$Vlans,
+
+    [ValidateSet('All','Only')]
+    [string]$VlanMode = 'All',
+
+    [string[]]$Macs,
+
     [ValidateRange(1,10)]
-    [int]$SshConnectTimeoutSeconds = 5
+    [int]$MaxParallel = 4
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+
+# --- Load library modules ---
+. (Join-Path $PSScriptRoot 'lib/Commands.ps1')
+. (Join-Path $PSScriptRoot 'lib/Settings.ps1')
+. (Join-Path $PSScriptRoot 'lib/LogFilter.ps1')
+. (Join-Path $PSScriptRoot 'lib/Report.ps1')
+. (Join-Path $PSScriptRoot 'lib/Network.ps1')
+. (Join-Path $PSScriptRoot 'lib/HostKeys.ps1')
+. (Join-Path $PSScriptRoot 'lib/Plink.ps1')
+. (Join-Path $PSScriptRoot 'lib/Collector.ps1')
+
+# --- GUI or legacy CLI dispatch ---
+$isLegacyMode = $PSBoundParameters.ContainsKey('Mode')
+$isHeadless = $NoGui.IsPresent -or $isLegacyMode
+
+if (-not $isHeadless) {
+    try {
+        . (Join-Path $PSScriptRoot 'gui/Gui.ps1')
+        $settingsFile = if ($SettingsPath) { $SettingsPath } else { Join-Path $PSScriptRoot 'settings.json' }
+        $guiSettings = Import-Settings -UserPath $settingsFile -DefaultPath (Join-Path $PSScriptRoot 'settings.default.json')
+        Show-CollectorGui -ScriptRoot $PSScriptRoot -Settings $guiSettings
+        return
+    }
+    catch {
+        Write-Host "GUI could not load: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "Falling back to CLI. Use -NoGui to run headless directly." -ForegroundColor Yellow
+        Write-Host ""
+    }
+}
 
 # ============================================================================
 # USER CONFIGURATION
